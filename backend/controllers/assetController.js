@@ -159,7 +159,8 @@ exports.generateQrCode = (req, res) => {
         }
         
         console.log(`[QR] Found unique_code: ${asset.unique_code} for asset ID: ${id}`);
-        const viewUrl = `http://localhost:3000/assets/view/${asset.unique_code}`;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const viewUrl = `${frontendUrl}/assets/view/${asset.unique_code}`;
         console.log(`[QR] Generating QR for URL: ${viewUrl}`);
         
         QRCode.toDataURL(viewUrl, (err, url) => {
