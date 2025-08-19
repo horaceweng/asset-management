@@ -1,0 +1,273 @@
+1. 系統架構規劃 (System Architecture)
+我們將採用一個標準的 三層式架構 (Three-Tier Architecture)，這也是目前主流的網頁應用程式架構，具備高彈性、高擴展性的優點。
+
++----------------+      +------------------------+      +----------------+
+|                |      |                        |      |                |
+|   使用者介面    |      |       後端應用程式       |      |     資料庫      |
+|  (Frontend)    |      |        (Backend)       |      |   (Database)   |
+| (React      )  |<----->| (Node.js        )     |<----->| (PostgreSQL)   |
+|                |      | - API 服務             |      | - 資產資料     |
+|                |      | - 業務邏輯             |      | - 使用者資料     |
+|                |      | - 權限控制             |      | - 紀錄 Log     |
+|                |      | - QR Code 生成         |      |                |
++----------------+      +------------------------+      +----------------+
+       ^
+       |
+       |  使用者透過瀏覽器或手機 App 存取
+       |
++----------------+
+|     使用者      |
+| (電腦、手機掃碼) |
++----------------+
+前端 (Frontend): 使用者直接互動的介面，是一個單頁式應用 (SPA, Single-Page Application)。它負責顯示資產資訊、提供操作按鈕，並透過 API 與後端溝通。
+
+後端 (Backend): 系統的核心大腦。負責所有業務邏輯、處理來自前端的請求、操作資料庫、驗證使用者權限、生成 QR Code 等。
+
+資料庫 (Database): 儲存所有永久性資料，包含使用者、角色、資產、分類、借還紀錄等。
+
+2. 技術棧建議 (Technology Stack)
+為了快速開發且易於維護，推薦以下組合：
+
+前端 (Frontend): React
+
+後端 (Backend): Node.js (Express)
+
+
+資料庫 (Database): PostgreSQL
+
+優點： 開源、穩定、功能強大，支援複雜的查詢與資料關聯，性能優越。
+
+QR Code 生成庫:
+
+Python: qrcode
+
+Node.js: qrcode
+
+3. 資料庫結構設計 (Database Schema)
+這是整個系統的基石。我們需要以下幾個核心資料表 (Table)：
+
+users (使用者表)
+儲存所有可以登入系統的人員。
+
+SQL
+
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL, -- 登入帳號
+    password_hash VARCHAR(255) NOT NULL,  -- 加密後的密碼
+    full_name VARCHAR(100),              -- 使用者全名
+    role_id INT REFERENCES roles(id),    -- 關聯到角色表
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+roles (角色表)
+定義權限角色。
+
+SQL
+
+CREATE TABLE roles (
+    id SERIAL PRIMARY KEY,
+    role_name VARCHAR(50) UNIQUE NOT NULL -- 'system_admin', 'asset_manager', 'user'
+);
+categories (資產分類表)
+使用「相鄰列表模型」來儲存階層關係 (大/中/小類)。
+
+SQL
+
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    parent_id INT REFERENCES categories(id), -- 指向父分類的 ID，若為 NULL 則為頂層分類
+    description TEXT
+);
+範例： 「數學教具」的 parent_id 為 NULL，「尺規教具」的 parent_id 指向「數學教具」的 ID。
+
+assets (資產主表)
+核心資產資料。
+
+SQL
+
+CREATE TABLE assets (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,                    -- 名稱 (圓規)
+    unique_code VARCHAR(100) UNIQUE NOT NULL,      -- 唯一編號 (系統生成，用於 QR Code)
+    asset_type VARCHAR(50) DEFAULT 'flexible',     -- 資產類型 ('flexible', 'fixed')
+    category_id INT REFERENCES categories(id),     -- 關聯到分類表
+    features JSONB,                                -- 特徵 (用 JSONB 格式彈性儲存，如 {'材質': '金屬'})
+    photo_url VARCHAR(255),                        -- 照片存放網址
+    status VARCHAR(50) DEFAULT 'available',        -- 狀態 ('available', 'in_use', 'maintenance', 'retired')
+    current_user_id INT REFERENCES users(id),      -- 若 in_use，指向借用者 ID
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+asset_type 欄位是為了您未來擴充「固定配置」資產所預留的。
+
+asset_logs (資產日誌表)
+記錄所有資產的借用與歸還歷史。
+
+SQL
+
+CREATE TABLE asset_logs (
+    id SERIAL PRIMARY KEY,
+    asset_id INT NOT NULL REFERENCES assets(id),
+    user_id INT NOT NULL REFERENCES users(id),
+    action VARCHAR(50) NOT NULL, -- 'checkout' (借出), 'checkin' (歸還)
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT -- 備註
+);
+asset_manager_permissions (資產管理者權限對應表)
+指定哪個管理者可以管理哪個「中類」或「小類」的資產。
+
+SQL
+
+CREATE TABLE asset_manager_permissions (
+    user_id INT NOT NULL REFERENCES users(id),
+    category_id INT NOT NULL REFERENCES categories(id),
+    PRIMARY KEY (user_id, category_id) -- 複合主鍵
+);
+4. API 端點設計 (API Endpoints)
+後端應提供一組 RESTful API 供前端呼叫。
+
+認證 (Auth)
+
+POST /api/auth/login: 使用者登入，成功後回傳 token。
+
+資產 (Assets)
+
+GET /api/assets: 取得資產列表，可帶參數篩選 (如分類、狀態)。
+
+GET /api/assets/{id}: 取得單一資產的詳細資訊。
+
+POST /api/assets: 新增資產 (僅資產管理者)。
+
+PUT /api/assets/{id}: 更新資產資訊 (僅資產管理者)。
+
+GET /api/assets/{id}/qrcode: 產生並回傳該資產的 QR Code 圖片。
+
+借還流程 (Check-out / Check-in)
+
+POST /api/assets/{id}/checkout: 借用資產 (需登入)。
+
+POST /api/assets/{id}/checkin: 歸還資產 (僅資產管理者或借用者本人)。
+
+使用者管理 (Users)
+
+POST /api/users: 新增使用者 (僅系統管理者)。
+
+GET /api/users: 取得使用者列表 (僅系統管理者)。
+
+分類 (Categories)
+
+GET /api/categories: 取得所有分類的樹狀結構。
+
+POST /api/categories: 新增分類 (僅資產管理者以上)。
+
+5. 核心功能模組詳述
+a. QR Code 掃碼流程
+生成： 當資產管理者在系統中新增一項資產時，後端：
+
+自動生成一個獨一無二的 unique_code (例如：ASSET-uuid())。
+
+組合出一個指向該資產的專屬網址，如 https://your-domain.com/assets/view/{unique_code}。
+
+以後端 QR Code 庫將此網址編碼成一張 QR Code 圖片。
+
+標籤化： 管理者可以從系統下載這張圖片，列印出來並貼在實體資產上。
+
+掃描： 任何使用者用手機掃描該 QR Code：
+
+手機的瀏覽器會自動開啟上述網址。
+
+前端應用程式偵測到 URL 中的 unique_code，立即向後端 API GET /api/assets/{unique_code} 請求資料。
+
+前端收到資料後，將資產的名稱、照片、狀態、保管人等資訊渲染成一個美觀的公開頁面。
+
+b. 借用/歸還登記 (Check-out / Check-in)
+借用 (Checkout):
+
+使用者在資產頁面點擊「我要借用」按鈕。
+
+前端發送 POST /api/assets/{id}/checkout 請求，並在 Header 中夾帶認證 token。
+
+後端驗證：
+
+使用者是否登入？
+
+該資產的 status 是否為 available？
+
+驗證通過後，後端執行一個 資料庫事務 (Transaction)：
+
+更新 assets 表，將 status 改為 in_use，並將 current_user_id 設為當前使用者 ID。
+
+在 asset_logs 表中新增一筆 action: 'checkout' 的紀錄。
+
+歸還 (Checkin):
+
+資產管理者或借用者在頁面點擊「歸還」。
+
+前端發送 POST /api/assets/{id}/checkin 請求。
+
+後端驗證權限。
+
+驗證通過後，後端執行 Transaction：
+
+更新 assets 表，將 status 改回 available，並將 current_user_id 設為 NULL。
+
+在 asset_logs 表中新增一筆 action: 'checkin' 的紀錄。
+
+c. 權限管理 (Role-Based Access Control)
+API 中介層 (Middleware): 在後端的所有 API 路由上，都應加上一個權限檢查的中介層。
+
+檢查邏輯：
+
+當中介層收到請求時，它會解析 token，取得使用者 ID 和角色。
+
+系統管理者 (system_admin): 可存取所有 API。
+
+資產管理者 (asset_manager):
+
+若要修改某資產，需檢查該資產的 category_id 是否在他被授權的範圍內 (asset_manager_permissions 表)。
+
+可以新增使用者，但不能變更其角色為 system_admin。
+
+使用者 (user):
+
+大部分 GET 請求都可以（查詢）。
+
+只能對 status 為 available 的資產執行 checkout。
+
+只能對自己借用的資產執行 checkin。
+
+6. 開發階段建議 (Development Roadmap)
+建議將專案分為以下幾個階段，循序漸進：
+
+第一階段：基礎建設 (Foundation)
+
+完成資料庫 Schema 設計與建立。
+
+搭建後端專案，完成使用者註冊、登入、角色權限的基礎 API。
+
+搭建前端專案，完成登入頁面與主佈局。
+
+第二階段：核心 CRUD 功能 (Core CRUD)
+
+完成「分類」的增刪改查功能。
+
+完成「資產」的增刪改查功能，包含圖片上傳。
+
+開發資產列表頁與詳細資訊頁。
+
+第三階段：關鍵業務流程 (Key Workflows)
+
+實作 QR Code 生成與掃碼後顯示資訊的完整流程。
+
+開發資產的借用 (Check-out) 與歸還 (Check-in) 功能。
+
+完成資產歷史紀錄的查詢頁面。
+
+第四階段：優化與部署 (Refinement & Deployment)
+
+完善權限管理，確保不同角色看到不同的操作按鈕。
+
+UI/UX 優化，讓介面更直觀易用。
+
+撰寫測試、修復 Bug，並將應用程式部署到伺服器上。
