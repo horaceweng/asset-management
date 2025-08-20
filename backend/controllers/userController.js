@@ -35,3 +35,18 @@ exports.getUsers = async (req, res) => {
         res.status(200).json(users);
     });
 };
+
+exports.getAssetManagers = (req, res) => {
+    const sql = `
+        SELECT u.id, u.full_name 
+        FROM users u
+        JOIN roles r ON u.role_id = r.id
+        WHERE r.role_name = 'asset_manager'
+    `;
+    db.all(sql, [], (err, managers) => {
+        if (err) {
+            return res.status(500).json({ message: 'Server error fetching asset managers', error: err.message });
+        }
+        res.status(200).json(managers);
+    });
+};

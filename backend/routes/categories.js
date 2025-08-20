@@ -8,10 +8,10 @@ router.use(authMiddleware.protect);
 
 router.route('/')
     .get(categoryController.getAllCategories)
-    .post(authMiddleware.restrictTo('system_admin', 'asset_manager'), categoryController.createCategory);
+    .post(authMiddleware.restrictTo('system_admin'), categoryController.createCategory);
 
 router.route('/:id')
-    .put(authMiddleware.restrictTo('system_admin', 'asset_manager'), categoryController.updateCategory)
-    .delete(authMiddleware.restrictTo('system_admin', 'asset_manager'), categoryController.deleteCategory);
+    .put(authMiddleware.restrictTo('system_admin'), categoryController.updateCategory)
+    .delete(authMiddleware.restrictTo('system_admin'), categoryController.deleteCategory);
 
 module.exports = router;

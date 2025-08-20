@@ -5,5 +5,6 @@ const authMiddleware = require('../middleware/authMiddleware');
 
 router.post('/', authMiddleware.protect, authMiddleware.restrictTo('system_admin'), userController.createUser);
 router.get('/', authMiddleware.protect, authMiddleware.restrictTo('system_admin'), userController.getUsers);
+router.get('/managers', authMiddleware.protect, authMiddleware.restrictTo('system_admin'), userController.getAssetManagers);
 
 module.exports = router;

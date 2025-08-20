@@ -20,14 +20,32 @@ exports.getAllCategories = (req, res) => {
 // @route   POST /api/categories
 // @access  Private/AssetManager+
 exports.createCategory = (req, res) => {
-    const { name, parent_id, description } = req.body;
-    const sql = 'INSERT INTO categories (name, parent_id, description) VALUES (?, ?, ?)';
+    // 1. 從 request body 中多讀取一個 manager_ids 陣列
+    const { name, parent_id, description, manager_ids } = req.body;
 
-    db.run(sql, [name, parent_id, description], function (err) {
-        if (err) {
-            return res.status(400).json({ message: 'Failed to create category', error: err.message });
-        }
-        res.status(201).json({ id: this.lastID, name, parent_id, description });
+    const insertCategorySql = 'INSERT INTO categories (name, parent_id, description) VALUES (?, ?, ?)';
+
+    // 2. 使用 db.serialize 來確保資料庫操作的順序性
+    db.serialize(() => {
+        db.run(insertCategorySql, [name, parent_id, description], function (err) {
+            if (err) {
+                return res.status(400).json({ message: 'Failed to create category', error: err.message });
+            }
+            
+            const categoryId = this.lastID; // 3. 取得剛剛建立的分類 ID
+
+            // 4. 如果有傳入管理者 ID，就進行指派
+            if (manager_ids && manager_ids.length > 0) {
+                const insertManagerSql = 'INSERT INTO category_managers (category_id, user_id) VALUES (?, ?)';
+                const stmt = db.prepare(insertManagerSql);
+                manager_ids.forEach(userId => {
+                    stmt.run(categoryId, userId);
+                });
+                stmt.finalize(); // 5. 執行所有插入操作
+            }
+
+            res.status(201).json({ id: categoryId, name });
+        });
     });
 };
 
@@ -36,16 +54,27 @@ exports.createCategory = (req, res) => {
 // @access  Private/AssetManager+
 exports.updateCategory = (req, res) => {
     const { id } = req.params;
-    const { name, parent_id, description } = req.body;
-    const sql = 'UPDATE categories SET name = ?, parent_id = ?, description = ? WHERE id = ?';
+    const { name, parent_id, description, manager_ids } = req.body;
 
-    db.run(sql, [name, parent_id, description, id], function (err) {
-        if (err) {
-            return res.status(400).json({ message: 'Failed to update category', error: err.message });
+    db.serialize(() => {
+        // 1. 更新 categories 表本身的資料
+        const updateCategorySql = 'UPDATE categories SET name = ?, parent_id = ?, description = ? WHERE id = ?';
+        db.run(updateCategorySql, [name, parent_id, description, id]);
+
+        // 2. 刪除這個分類所有舊的管理者關聯
+        const deleteManagersSql = 'DELETE FROM category_managers WHERE category_id = ?';
+        db.run(deleteManagersSql, [id]);
+
+        // 3. 如果有傳入新的管理者 ID，就建立新的關聯
+        if (manager_ids && manager_ids.length > 0) {
+            const insertManagerSql = 'INSERT INTO category_managers (category_id, user_id) VALUES (?, ?)';
+            const stmt = db.prepare(insertManagerSql);
+            manager_ids.forEach(userId => {
+                stmt.run(id, userId);
+            });
+            stmt.finalize();
         }
-        if (this.changes === 0) {
-            return res.status(404).json({ message: 'Category not found' });
-        }
+
         res.status(200).json({ message: 'Category updated successfully' });
     });
 };

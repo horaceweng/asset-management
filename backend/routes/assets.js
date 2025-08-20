@@ -45,7 +45,7 @@ router.use(authMiddleware.protect);
 
 router.route('/')
     .get(assetController.getAllAssets)
-    .post(authMiddleware.restrictTo('system_admin', 'asset_manager'), (req, res) => {
+    .post(authMiddleware.restrictTo('system_admin'), (req, res) => {
         upload(req, res, (err) => {
             if (err) {
                 return res.status(400).json({ message: 'File upload error', error: err });
@@ -58,7 +58,7 @@ router.get('/:id/qrcode', assetController.generateQrCode);
 
 router.route('/:id')
     .get(assetController.getAssetById)
-    .put(authMiddleware.restrictTo('system_admin', 'asset_manager'), (req, res) => {
+    .put(authMiddleware.restrictTo('system_admin'), (req, res) => {
         upload(req, res, (err) => {
             if (err) {
                 return res.status(400).json({ message: 'File upload error', error: err });
@@ -66,6 +66,9 @@ router.route('/:id')
             assetController.updateAsset(req, res);
         });
     })
-    .delete(authMiddleware.restrictTo('system_admin', 'asset_manager'), assetController.deleteAsset);
+    .delete(authMiddleware.restrictTo('system_admin'), assetController.deleteAsset);
+
+router.post('/:id/checkout', assetController.checkoutAsset);
+router.post('/:id/checkin', assetController.checkinAsset);
 
 module.exports = router;

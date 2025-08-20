@@ -26,6 +26,9 @@ exports.getAllAssets = (req, res) => {
 // @access  Private
 exports.getAssetById = (req, res) => {
     const { id } = req.params;
+    const userId = req.user.id;
+    const userRoleId = req.user.role_id;
+
     const sql = `
         SELECT a.*, c.name as category_name, u.full_name as current_user_name
         FROM assets a
@@ -40,7 +43,28 @@ exports.getAssetById = (req, res) => {
         if (!asset) {
             return res.status(404).json({ message: 'Asset not found' });
         }
-        res.status(200).json(asset);
+
+        // Check if the current user can manage this asset
+        const checkPermission = (callback) => {
+            if (userRoleId === 1) { // System admin
+                return callback(null, true);
+            }
+            const managerSql = `SELECT 1 FROM category_managers WHERE user_id = ? AND category_id = ?`;
+            db.get(managerSql, [userId, asset.category_id], (err, manager) => {
+                if (err) {
+                    return callback(err);
+                }
+                callback(null, !!manager);
+            });
+        };
+
+        checkPermission((err, canManage) => {
+            if (err) {
+                return res.status(500).json({ message: 'Database error checking permissions', error: err.message });
+            }
+            asset.can_manage = canManage;
+            res.status(200).json(asset);
+        });
     });
 };
 
@@ -189,5 +213,132 @@ exports.deleteAsset = (req, res) => {
             return res.status(404).json({ message: 'Asset not found' });
         }
         res.status(200).json({ message: 'Asset retired successfully' });
+    });
+};
+
+// @desc    Checkout an asset
+// @route   POST /api/assets/:id/checkout
+// @access  Private
+exports.checkoutAsset = (req, res) => {
+    const assetId = req.params.id;
+    const userId = req.user.id;
+    const userRoleId = req.user.role_id;
+
+    db.get('SELECT * FROM assets WHERE id = ?', [assetId], (err, asset) => {
+        if (err) {
+            return res.status(500).json({ message: 'Database error', error: err.message });
+        }
+        if (!asset) {
+            return res.status(404).json({ message: 'Asset not found' });
+        }
+        if (asset.status !== 'available') {
+            return res.status(400).json({ message: 'Asset is not available for checkout.' });
+        }
+
+        const checkPermission = (callback) => {
+            // 1. System admin (role_id 1) can always checkout.
+            if (userRoleId === 1) {
+                return callback(null, true);
+            }
+            // 2. The manager of the asset's category can checkout.
+            const managerSql = `SELECT 1 FROM category_managers WHERE user_id = ? AND category_id = ?`;
+            db.get(managerSql, [userId, asset.category_id], (err, manager) => {
+                if (err) {
+                    return callback(err);
+                }
+                // If user is a manager for this category, they have permission.
+                return callback(null, !!manager);
+            });
+        };
+
+        checkPermission((err, hasPermission) => {
+            if (err) {
+                return res.status(500).json({ message: 'Database error checking permissions', error: err.message });
+            }
+            if (!hasPermission) {
+                return res.status(403).json({ message: 'You do not have permission to check out this asset.' });
+            }
+
+            const checkoutSql = `UPDATE assets SET status = 'in_use', current_user_id = ?, updated_at = datetime('now') WHERE id = ?`;
+            // For checkout, we assign it to the user who performs the action.
+            db.run(checkoutSql, [userId, assetId], function(err) {
+                if (err) {
+                    return res.status(500).json({ message: 'Failed to checkout asset', error: err.message });
+                }
+
+                // --- 這就是我們要加入的日誌 ---
+                console.log(`[Action] Asset ${assetId} checked out by user ${userId} (${req.user.username}).`);
+                // --------------------------------
+
+                const logSql = `INSERT INTO asset_history (asset_id, user_id, action, details) VALUES (?, ?, ?, ?)`;
+                const details = JSON.stringify({ checked_out_by: userId });
+                db.run(logSql, [assetId, userId, 'checked_out', details]);
+
+                res.status(200).json({ message: 'Asset checked out successfully' });
+            });
+        });
+    });
+};
+
+// @desc    Checkin an asset
+// @route   POST /api/assets/:id/checkin
+// @access  Private
+exports.checkinAsset = (req, res) => {
+    const assetId = req.params.id;
+    const userId = req.user.id;
+    const userRoleId = req.user.role_id;
+
+    db.get('SELECT * FROM assets WHERE id = ?', [assetId], (err, asset) => {
+        if (err) {
+            return res.status(500).json({ message: 'Database error', error: err.message });
+        }
+        if (!asset) {
+            return res.status(404).json({ message: 'Asset not found' });
+        }
+        if (asset.status !== 'in_use') {
+            return res.status(400).json({ message: 'Asset is not currently checked out.' });
+        }
+
+        const checkPermission = (callback) => {
+            // 1. System admin (role_id 1) can always check in.
+            if (userRoleId === 1) {
+                return callback(null, true);
+            }
+            // 2. The manager of the asset's category can check it in.
+            const managerSql = `SELECT 1 FROM category_managers WHERE user_id = ? AND category_id = ?`;
+            db.get(managerSql, [userId, asset.category_id], (err, manager) => {
+                if (err) {
+                    return callback(err);
+                }
+                // If user is a manager for this category, they have permission.
+                return callback(null, !!manager);
+            });
+        };
+
+        checkPermission((err, hasPermission) => {
+            if (err) {
+                return res.status(500).json({ message: 'Database error checking permissions', error: err.message });
+            }
+            if (!hasPermission) {
+                return res.status(403).json({ message: 'You do not have permission to check in this asset.' });
+            }
+
+            const checkinSql = `UPDATE assets SET status = 'available', current_user_id = NULL, updated_at = datetime('now') WHERE id = ?`;
+            db.run(checkinSql, [assetId], function(err) {
+                if (err) {
+                    return res.status(500).json({ message: 'Failed to check in asset', error: err.message });
+                }
+
+                // --- 這就是我們要加入的日誌 ---
+                console.log(`[Action] Asset ${assetId} checked in by user ${userId} (${req.user.username}).`);
+                // --------------------------------
+                
+                const logSql = `INSERT INTO asset_history (asset_id, user_id, action, details) VALUES (?, ?, ?, ?)`;
+                const details = JSON.stringify({ checked_in_by: userId });
+                db.run(logSql, [assetId, userId, 'checked_in', details]);
+                
+                res.status(200).json({ message: 'Asset checked in successfully' });
+            });
+        });
     });
 };

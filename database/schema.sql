@@ -29,37 +29,37 @@ CREATE TABLE categories (
 -- assets (資產主表)
 CREATE TABLE assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,                    -- 名稱 (圓規)
-    unique_code TEXT UNIQUE NOT NULL,      -- 唯一編號 (系統生成，用於 QR Code)
-    asset_type TEXT DEFAULT 'flexible',    -- 資產類型 ('flexible', 'fixed')
-    category_id INTEGER,                   -- 關聯到分類表
-    features TEXT,                         -- 特徵 (用 JSON 格式彈性儲存)
-    photo_url TEXT,                        -- 照片存放網址
-    status TEXT DEFAULT 'available',       -- 狀態 ('available', 'in_use', 'maintenance', 'retired')
-    current_user_id INTEGER,               -- 若 in_use，指向借用者 ID
+    name TEXT NOT NULL,
+    unique_code TEXT UNIQUE NOT NULL,
+    asset_type TEXT DEFAULT 'flexible',
+    category_id INTEGER,
+    features TEXT,
+    photo_url TEXT,
+    status TEXT DEFAULT 'available',
+    current_user_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (category_id) REFERENCES categories (id),
     FOREIGN KEY (current_user_id) REFERENCES users (id)
 );
 
--- asset_logs (資產日誌表)
-CREATE TABLE asset_logs (
+-- asset_history (資產歷史紀錄表)
+CREATE TABLE asset_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    action TEXT NOT NULL, -- 'checkout' (借出), 'checkin' (歸還)
+    action TEXT NOT NULL, -- e.g., 'created', 'updated', 'checked_out', 'checked_in', 'retired'
+    user_id INTEGER, -- User who performed the action
+    details TEXT, -- e.g., JSON string of what was changed
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT, -- 備註
-    FOREIGN KEY (asset_id) REFERENCES assets (id),
-    FOREIGN KEY (user_id) REFERENCES users (id)
+    FOREIGN KEY (asset_id) REFERENCES assets(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- asset_manager_permissions (資產管理者權限對應表)
-CREATE TABLE asset_manager_permissions (
+-- category_managers (分類管理者對應表)
+CREATE TABLE category_managers (
     user_id INTEGER NOT NULL,
     category_id INTEGER NOT NULL,
     PRIMARY KEY (user_id, category_id),
-    FOREIGN KEY (user_id) REFERENCES users (id),
-    FOREIGN KEY (category_id) REFERENCES categories (id)
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
 );
